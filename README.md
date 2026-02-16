@@ -8,13 +8,7 @@
   Built with TypeScript + Rust, powered by Tauri.
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/github/actions/workflow/status/your-username/holst/ci.yml?label=build&style=for-the-badge" />
-  <img src="https://img.shields.io/github/license/your-username/holst?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/Tauri-Desktop-blue?style=for-the-badge&logo=tauri" />
-  <img src="https://img.shields.io/badge/Rust-Backend-orange?style=for-the-badge&logo=rust" />
-  <img src="https://img.shields.io/badge/TypeScript-Frontend-blue?style=for-the-badge&logo=typescript" />
-</p>
+
 
 <hr/>
 
