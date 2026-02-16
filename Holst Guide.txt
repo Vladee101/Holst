@@ -1,0 +1,804 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { 
+  Square, 
+  Circle, 
+  Type, 
+  Trash2, 
+  MousePointer2, 
+  Grid,
+  Move,
+  Palette,
+  X,
+  Minus,
+  ArrowRight,
+  ZoomIn,
+  ZoomOut,
+  Maximize,
+  Download,
+  Upload
+} from 'lucide-react';
+
+const COLORS = [
+  { name: 'Blue', value: 'bg-blue-500' },
+  { name: 'Red', value: 'bg-red-500' },
+  { name: 'Green', value: 'bg-green-500' },
+  { name: 'Yellow', value: 'bg-yellow-400' },
+  { name: 'Purple', value: 'bg-purple-500' },
+  { name: 'Gray', value: 'bg-gray-500' },
+  { name: 'Black', value: 'bg-black' },
+];
+
+export default function App() {
+  const [elements, setElements] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  
+  // view: Tracks the canvas camera state
+  const [view, setView] = useState({ x: 0, y: 0, scale: 1 });
+
+  // dragState: { mode: 'moving' | 'panning' | 'resizing...', id, startX, startY, ... }
+  const [dragState, setDragState] = useState(null); 
+  
+  const canvasRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  // --- HTML5 Drag & Drop (Sidebar to Canvas) ---
+
+  const handleDragStart = (e, type) => {
+    e.dataTransfer.setData('application/react-dnd-type', type);
+    e.dataTransfer.effectAllowed = 'copy';
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    const type = e.dataTransfer.getData('application/react-dnd-type');
+    
+    if (!type || !canvasRef.current) return;
+
+    const canvasRect = canvasRef.current.getBoundingClientRect();
+    
+    // Calculate raw mouse position relative to canvas container
+    const rawX = e.clientX - canvasRect.left;
+    const rawY = e.clientY - canvasRect.top;
+
+    // Convert raw mouse position to World Coordinates (accounting for Pan & Zoom)
+    const x = (rawX - view.x) / view.scale;
+    const y = (rawY - view.y) / view.scale;
+
+    let width = 100;
+    let height = 100;
+    let rotate = 0; 
+    
+    if (type === 'line' || type === 'arrow') {
+      width = 200;
+      height = 20; 
+    }
+    if (type === 'text') {
+      width = 200;
+      height = 50;
+    }
+
+    const newElement = {
+      id: crypto.randomUUID(),
+      type,
+      x: x - (width / 2),
+      y: y - (height / 2),
+      rotate, 
+      color: 'bg-black',
+      text: type === 'text' ? 'Double Click to Edit' : '',
+      width,
+      height,
+    };
+
+    setElements((prev) => [...prev, newElement]);
+    setSelectedId(newElement.id);
+    setEditingId(null);
+  };
+
+  // --- Canvas Navigation (Zoom/Pan) ---
+
+  const handleWheel = (e) => {
+    if (e.ctrlKey) e.preventDefault(); // Prevent browser zoom
+
+    const rect = canvasRef.current.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // Determine scale amount (e.deltaY is usually 100 or -100)
+    const delta = -e.deltaY * 0.001;
+    const newScale = Math.min(Math.max(0.1, view.scale + delta), 5);
+
+    // Zoom towards the mouse pointer:
+    // 1. Calculate the ratio of the new scale to the old scale
+    const scaleRatio = newScale / view.scale;
+    
+    // 2. Adjust pan (x,y) so the point under the mouse remains stationary
+    const newX = mouseX - (mouseX - view.x) * scaleRatio;
+    const newY = mouseY - (mouseY - view.y) * scaleRatio;
+
+    setView({ scale: newScale, x: newX, y: newY });
+  };
+
+  const zoomIn = () => {
+    setView(prev => ({ ...prev, scale: Math.min(prev.scale * 1.2, 5) }));
+  };
+
+  const zoomOut = () => {
+    setView(prev => ({ ...prev, scale: Math.max(prev.scale / 1.2, 0.1) }));
+  };
+
+  const resetView = () => {
+    setView({ x: 0, y: 0, scale: 1 });
+  };
+
+  // --- Export / Import Handlers ---
+
+  const handleExport = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(elements));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", "canvas_export.json");
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const importedElements = JSON.parse(event.target.result);
+        if (Array.isArray(importedElements)) {
+          setElements(importedElements);
+          setSelectedId(null);
+          setEditingId(null);
+        }
+      } catch (err) {
+        console.error("Failed to parse JSON", err);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = null; 
+  };
+
+  // --- Interaction Handlers ---
+
+  const startPanning = (e) => {
+    // Only pan if clicking directly on the canvas background
+    if (e.target === canvasRef.current) {
+        setSelectedId(null);
+        setEditingId(null);
+        setDragState({
+            mode: 'panning',
+            startX: e.clientX,
+            startY: e.clientY,
+            initialView: { ...view }
+        });
+    }
+  };
+
+  const startMoving = (e, id) => {
+    e.stopPropagation();
+    const element = elements.find(el => el.id === id);
+    if (!element) return;
+
+    setSelectedId(id);
+    if (editingId !== id) setEditingId(null);
+    
+    setDragState({
+      mode: 'moving',
+      id,
+      startX: e.clientX,
+      startY: e.clientY,
+      initialElemX: element.x,
+      initialElemY: element.y
+    });
+  };
+
+  const startResizing = (e, id, handleType) => {
+    e.stopPropagation();
+    e.preventDefault(); 
+    const element = elements.find(el => el.id === id);
+    if (!element) return;
+
+    setSelectedId(id);
+
+    setDragState({
+      mode: handleType, 
+      id,
+      initial: { ...element } 
+    });
+  };
+
+  const handleMouseMove = (e) => {
+    if (!dragState || !canvasRef.current) return;
+    const canvasRect = canvasRef.current.getBoundingClientRect();
+    
+    // Raw mouse position relative to canvas DOM element
+    const rawMouseX = e.clientX - canvasRect.left;
+    const rawMouseY = e.clientY - canvasRect.top;
+
+    // Converted to World Space (accounting for pan/zoom)
+    const mouseX = (rawMouseX - view.x) / view.scale;
+    const mouseY = (rawMouseY - view.y) / view.scale;
+
+    if (dragState.mode === 'panning') {
+        const dx = e.clientX - dragState.startX;
+        const dy = e.clientY - dragState.startY;
+        
+        setView({
+            ...view,
+            x: dragState.initialView.x + dx,
+            y: dragState.initialView.y + dy
+        });
+        return;
+    }
+
+    if (dragState.mode === 'moving') {
+      const dx = (e.clientX - dragState.startX) / view.scale; // Divide by scale
+      const dy = (e.clientY - dragState.startY) / view.scale; // Divide by scale
+
+      setElements(prev => prev.map(el => {
+        if (el.id === dragState.id) {
+          return {
+            ...el,
+            x: dragState.initialElemX + dx,
+            y: dragState.initialElemY + dy
+          };
+        }
+        return el;
+      }));
+    }
+    else if (dragState.mode === 'resizing-shape') {
+      const el = dragState.initial;
+      
+      const newWidth = Math.max(30, mouseX - el.x);
+      const newHeight = Math.max(30, mouseY - el.y);
+      
+      setElements(prev => prev.map(item => 
+        item.id === dragState.id 
+          ? { ...item, width: newWidth, height: newHeight } 
+          : item
+      ));
+    }
+    else if (dragState.mode === 'resizing-end') {
+      const el = dragState.initial;
+      const startX = el.x; 
+      const startY = el.y + (el.height / 2); 
+
+      const deltaX = mouseX - startX;
+      const deltaY = mouseY - startY;
+
+      const newWidth = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+      const newRotate = Math.atan2(deltaY, deltaX) * (180 / Math.PI);
+
+      setElements(prev => prev.map(item => 
+        item.id === dragState.id 
+          ? { ...item, width: newWidth, rotate: newRotate } 
+          : item
+      ));
+    }
+    else if (dragState.mode === 'resizing-start') {
+      const el = dragState.initial;
+      const rads = el.rotate * (Math.PI / 180);
+      
+      const currentEndX = el.x + el.width * Math.cos(rads);
+      const currentEndY = (el.y + el.height/2) + el.width * Math.sin(rads);
+
+      const newX = mouseX;
+      const newY = mouseY - (el.height / 2);
+
+      const deltaX = currentEndX - mouseX;
+      const deltaY = currentEndY - (mouseY); 
+
+      const newWidth = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+      const newRotate = Math.atan2(deltaY, deltaX) * (180 / Math.PI);
+
+      setElements(prev => prev.map(item => 
+        item.id === dragState.id 
+          ? { ...item, x: newX, y: newY, width: newWidth, rotate: newRotate } 
+          : item
+      ));
+    }
+  };
+
+  const handleMouseUp = () => {
+    setDragState(null);
+  };
+
+  // --- Element Management ---
+
+  const deleteSelected = () => {
+    if (selectedId) {
+      setElements(prev => prev.filter(el => el.id !== selectedId));
+      setSelectedId(null);
+      setEditingId(null);
+    }
+  };
+
+  const updateSelectedColor = (colorClass) => {
+    if (selectedId) {
+      setElements(prev => prev.map(el => 
+        el.id === selectedId ? { ...el, color: colorClass } : el
+      ));
+    }
+  };
+  
+  const updateSelectedText = (newText) => {
+    const targetId = editingId || selectedId;
+    if (targetId) {
+      setElements(prev => prev.map(el => 
+        el.id === targetId ? { ...el, text: newText } : el
+      ));
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
+        const tagName = document.activeElement.tagName;
+        if (tagName !== 'INPUT' && tagName !== 'TEXTAREA') {
+            deleteSelected();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedId]);
+
+
+  // --- Render Helpers ---
+
+  const getTextColor = (bgClass) => bgClass.replace('bg-', 'text-');
+  const getBorderColor = (bgClass) => bgClass.replace('bg-', 'border-');
+
+  // Universal Resize Handle
+  const ResizeHandle = ({ onMouseDown, className, style }) => (
+    <div 
+      onMouseDown={onMouseDown}
+      className={`absolute w-3 h-3 bg-white border-2 border-blue-500 rounded-full z-20 hover:scale-125 transition-transform ${className}`} 
+      style={style} 
+    />
+  );
+
+  const renderElement = (el) => {
+    const isSelected = selectedId === el.id;
+    const isEditing = editingId === el.id;
+    
+    // Note: TransformOrigin is handled by the parent container now effectively, but local rotation still needs it
+    const style = { 
+        transform: `translate(${el.x}px, ${el.y}px) rotate(${el.rotate || 0}deg)`, 
+        width: el.width, 
+        height: el.height,
+        transformOrigin: '0px 50%' 
+    };
+
+    const commonClasses = `absolute flex items-center justify-center group select-none
+      ${isSelected ? 'z-10' : 'z-0'}
+    `;
+
+    if (el.type === 'square') {
+      return (
+        <div
+          key={el.id}
+          style={style}
+          className={`${commonClasses} cursor-move bg-white border-[3px] ${getBorderColor(el.color)} rounded-lg ${isSelected ? 'ring-2 ring-blue-500 ring-offset-2' : 'hover:ring-2 hover:ring-blue-200'}`}
+          onMouseDown={(e) => startMoving(e, el.id)}
+          onDoubleClick={(e) => { e.stopPropagation(); setEditingId(el.id); }}
+        >
+            {isEditing ? (
+                <textarea 
+                    className="w-full h-full bg-transparent text-center resize-none outline-none p-2 font-medium text-gray-800"
+                    value={el.text}
+                    onChange={(e) => updateSelectedText(e.target.value)}
+                    onMouseDown={(e) => e.stopPropagation()} 
+                    onBlur={() => setEditingId(null)}
+                    autoFocus
+                />
+            ) : (
+                <div className="w-full h-full flex items-center justify-center pointer-events-none p-2 overflow-hidden">
+                     <span className="text-center font-medium text-gray-700 break-words leading-tight w-full">{el.text}</span>
+                </div>
+            )}
+
+            {isSelected && (
+              <>
+                <div className="absolute -top-6 left-0 text-xs bg-black text-white px-1 rounded transform -rotate-0" style={{ transform: `scale(${1/view.scale})` }}>Box</div>
+                <ResizeHandle 
+                  className="cursor-nwse-resize" 
+                  style={{ right: '-6px', bottom: '-6px' }}
+                  onMouseDown={(e) => startResizing(e, el.id, 'resizing-shape')}
+                />
+              </>
+            )}
+        </div>
+      );
+    }
+
+    if (el.type === 'circle') {
+      return (
+        <div
+          key={el.id}
+          style={style}
+          className={`${commonClasses} cursor-move bg-white border-[3px] ${getBorderColor(el.color)} rounded-full ${isSelected ? 'ring-2 ring-blue-500 ring-offset-2' : 'hover:ring-2 hover:ring-blue-200'}`}
+          onMouseDown={(e) => startMoving(e, el.id)}
+          onDoubleClick={(e) => { e.stopPropagation(); setEditingId(el.id); }}
+        >
+            {isEditing ? (
+                <div className="w-[70%] h-[70%] flex items-center justify-center">
+                    <textarea 
+                        className="w-full h-full bg-transparent text-center resize-none outline-none font-medium text-gray-800 flex flex-col justify-center"
+                        value={el.text}
+                        onChange={(e) => updateSelectedText(e.target.value)}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onBlur={() => setEditingId(null)}
+                        autoFocus
+                    />
+                </div>
+            ) : (
+                 <div className="w-[70%] h-[70%] flex items-center justify-center pointer-events-none overflow-hidden">
+                     <span className="text-center font-medium text-gray-700 break-words leading-tight w-full">{el.text}</span>
+                </div>
+            )}
+
+             {isSelected && (
+               <>
+                 <div className="absolute -top-6 left-0 text-xs bg-black text-white px-1 rounded" style={{ transform: `scale(${1/view.scale})` }}>Circle</div>
+                 <ResizeHandle 
+                   className="cursor-nwse-resize" 
+                   style={{ right: '14.6%', bottom: '14.6%' }}
+                   onMouseDown={(e) => startResizing(e, el.id, 'resizing-shape')}
+                 />
+               </>
+             )}
+        </div>
+      );
+    }
+
+    if (el.type === 'text') {
+      return (
+        <div
+          key={el.id}
+          style={style}
+          className={`absolute flex items-start justify-start group select-none cursor-move bg-white border border-gray-200 px-2 py-2 rounded-md shadow-md ${isSelected ? 'z-10 ring-2 ring-blue-500 ring-offset-2' : 'z-0 hover:ring-2 hover:ring-blue-200'}`}
+          onMouseDown={(e) => startMoving(e, el.id)}
+          onDoubleClick={(e) => { e.stopPropagation(); setEditingId(el.id); }}
+        >
+          {isEditing ? (
+              <textarea 
+                value={el.text} 
+                onChange={(e) => updateSelectedText(e.target.value)}
+                className="w-full h-full bg-transparent outline-none resize-none font-medium text-gray-800 leading-tight"
+                style={{ textAlign: 'left' }} 
+                autoFocus
+                onMouseDown={(e) => e.stopPropagation()}
+                onBlur={() => setEditingId(null)}
+              />
+          ) : (
+              <div className="w-full h-full pointer-events-none text-left font-medium text-gray-800 leading-tight whitespace-pre-wrap break-words overflow-hidden">
+                {el.text || "Text"}
+              </div>
+          )}
+          
+          {isSelected && (
+              <>
+                <div className="absolute -top-6 left-0 text-xs bg-black text-white px-1 rounded" style={{ transform: `scale(${1/view.scale})` }}>Text</div>
+                <ResizeHandle 
+                  className="cursor-nwse-resize" 
+                  style={{ right: '-6px', bottom: '-6px' }}
+                  onMouseDown={(e) => startResizing(e, el.id, 'resizing-shape')}
+                />
+              </>
+          )}
+        </div>
+      );
+    }
+
+    if (el.type === 'line') {
+        return (
+          <div
+            key={el.id}
+            style={style}
+            className={`${commonClasses} cursor-move`}
+            onMouseDown={(e) => startMoving(e, el.id)}
+          >
+              <div className={`w-full h-[3px] rounded-full ${el.color} ${isSelected ? 'ring-1 ring-blue-400 ring-offset-2' : ''}`} />
+              
+              {isSelected && (
+                  <>
+                     <ResizeHandle 
+                       className="-left-1.5 cursor-crosshair" 
+                       style={{ top: '50%', transform: 'translateY(-50%)' }}
+                       onMouseDown={(e) => startResizing(e, el.id, 'resizing-start')} 
+                     />
+                     <ResizeHandle 
+                       className="-right-1.5 cursor-crosshair" 
+                       style={{ top: '50%', transform: 'translateY(-50%)' }}
+                       onMouseDown={(e) => startResizing(e, el.id, 'resizing-end')} 
+                     />
+                  </>
+              )}
+          </div>
+        );
+    }
+
+    if (el.type === 'arrow') {
+        return (
+          <div
+            key={el.id}
+            style={style}
+            className={`${commonClasses} cursor-move flex items-center`}
+            onMouseDown={(e) => startMoving(e, el.id)}
+          >
+              <div className={`flex-1 h-[3px] rounded-l-full ${el.color} ${isSelected ? 'ring-1 ring-blue-400 ring-offset-2' : ''}`} />
+              
+              <svg 
+                width="24" 
+                height="24" 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="3" 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                className={`-ml-1 w-6 h-6 ${getTextColor(el.color)}`}
+              >
+                <path d="M5 12h14" stroke="transparent" />
+                <path d="m12 5 7 7-7 7" fill="none" />
+              </svg>
+
+              {isSelected && (
+                  <>
+                     <ResizeHandle 
+                       className="-left-1.5 cursor-crosshair" 
+                       style={{ top: '50%', transform: 'translateY(-50%)' }}
+                       onMouseDown={(e) => startResizing(e, el.id, 'resizing-start')} 
+                     />
+                     <ResizeHandle 
+                       className="-right-1.5 cursor-crosshair" 
+                       style={{ top: '50%', transform: 'translateY(-50%)' }}
+                       onMouseDown={(e) => startResizing(e, el.id, 'resizing-end')} 
+                     />
+                  </>
+              )}
+          </div>
+        );
+    }
+  };
+
+  return (
+    <div className="flex h-screen w-full bg-gray-50 overflow-hidden font-sans text-gray-900" onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}>
+      
+      {/* --- Sidebar / Toolbox --- */}
+      <div className="w-64 bg-white border-r border-gray-200 flex flex-col z-20 shadow-sm shrink-0">
+        <div className="p-4 border-b border-gray-100">
+          <h1 className="font-bold text-lg flex items-center gap-2 text-gray-800">
+            <Grid className="w-5 h-5 text-blue-600" />
+            Canvas Proto
+          </h1>
+          <p className="text-xs text-gray-400 mt-1">Drag items to the grid</p>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-6">
+          
+          {/* Shapes Section */}
+          <div>
+            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Shapes</h2>
+            <div className="grid grid-cols-2 gap-3">
+              <div 
+                draggable
+                onDragStart={(e) => handleDragStart(e, 'square')}
+                className="aspect-square bg-gray-50 border border-gray-200 rounded-lg flex flex-col items-center justify-center cursor-grab active:cursor-grabbing hover:border-blue-500 hover:bg-blue-50 transition-colors"
+              >
+                <Square className="w-8 h-8 text-gray-600 mb-2" />
+                <span className="text-xs text-gray-600">Box</span>
+              </div>
+              
+              <div 
+                draggable
+                onDragStart={(e) => handleDragStart(e, 'circle')}
+                className="aspect-square bg-gray-50 border border-gray-200 rounded-lg flex flex-col items-center justify-center cursor-grab active:cursor-grabbing hover:border-blue-500 hover:bg-blue-50 transition-colors"
+              >
+                <Circle className="w-8 h-8 text-gray-600 mb-2" />
+                <span className="text-xs text-gray-600">Circle</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Connectors Section */}
+          <div>
+             <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Connectors</h2>
+             <div className="grid grid-cols-2 gap-3">
+              <div 
+                draggable
+                onDragStart={(e) => handleDragStart(e, 'line')}
+                className="aspect-square bg-gray-50 border border-gray-200 rounded-lg flex flex-col items-center justify-center cursor-grab active:cursor-grabbing hover:border-blue-500 hover:bg-blue-50 transition-colors"
+              >
+                <Minus className="w-8 h-8 text-gray-600 mb-2" />
+                <span className="text-xs text-gray-600">Line</span>
+              </div>
+              
+              <div 
+                draggable
+                onDragStart={(e) => handleDragStart(e, 'arrow')}
+                className="aspect-square bg-gray-50 border border-gray-200 rounded-lg flex flex-col items-center justify-center cursor-grab active:cursor-grabbing hover:border-blue-500 hover:bg-blue-50 transition-colors"
+              >
+                <ArrowRight className="w-8 h-8 text-gray-600 mb-2" />
+                <span className="text-xs text-gray-600">Arrow</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Elements Section */}
+          <div>
+            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Elements</h2>
+            <div className="space-y-3">
+                <div 
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, 'text')}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-center gap-3 cursor-grab active:cursor-grabbing hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                >
+                  <Type className="w-5 h-5 text-gray-600" />
+                  <span className="text-sm text-gray-600">Text Block</span>
+                </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      {/* --- Main Canvas Area --- */}
+      <div className="flex-1 flex flex-col relative bg-gray-100 overflow-hidden">
+        
+        {/* Toolbar Header */}
+        <div className="h-14 bg-white border-b border-gray-200 flex items-center px-6 justify-between z-10 shrink-0">
+           {/* Left Side: Status */}
+           <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 rounded-md text-gray-600 text-sm">
+                {dragState?.mode === 'panning' ? <Move className="w-4 h-4" /> : <MousePointer2 className="w-4 h-4" />}
+                <span>{selectedId ? 'Element Selected' : 'Drag BG to Pan'}</span>
+              </div>
+           </div>
+
+           {/* Right Side: Tools */}
+           <div className="flex items-center gap-4">
+              
+              {/* Dynamic Tools (Color/Delete) */}
+              {selectedId && (
+                <div className="flex items-center gap-4 animate-in fade-in slide-in-from-top-2 duration-200">
+                    
+                    {/* Color Picker */}
+                    <div className="flex items-center gap-2">
+                       {COLORS.map((c) => (
+                          <button 
+                            key={c.name}
+                            onClick={() => updateSelectedColor(c.value)}
+                            className={`w-6 h-6 rounded-full ${c.value} hover:scale-110 transition-transform ring-1 ring-gray-200 ${elements.find(e => e.id === selectedId)?.color === c.value ? 'ring-2 ring-offset-2 ring-blue-500 scale-110' : ''}`}
+                            title={c.name}
+                          />
+                       ))}
+                    </div>
+
+                    <div className="h-6 w-px bg-gray-300 mx-2"></div>
+
+                    <button 
+                      onClick={deleteSelected}
+                      className="flex items-center gap-2 text-red-500 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-md transition-colors text-sm font-medium"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Delete
+                    </button>
+                    
+                    {/* Divider between selection tools and file tools */}
+                    <div className="h-6 w-px bg-gray-300 mx-2"></div>
+                </div>
+              )}
+
+              {/* Static File Tools (Export/Import) */}
+              <div className="flex items-center gap-2">
+                  <button 
+                    onClick={handleExport}
+                    className="flex items-center gap-2 text-gray-600 hover:bg-gray-100 px-3 py-1.5 rounded-md transition-colors text-sm font-medium"
+                    title="Save as JSON"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export
+                  </button>
+                  <button 
+                    onClick={handleImportClick}
+                    className="flex items-center gap-2 text-gray-600 hover:bg-gray-100 px-3 py-1.5 rounded-md transition-colors text-sm font-medium"
+                    title="Load JSON"
+                  >
+                    <Upload className="w-4 h-4" />
+                    Import
+                  </button>
+                  {/* Hidden Input for File Upload */}
+                  <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    onChange={handleFileChange} 
+                    className="hidden" 
+                    accept=".json"
+                  />
+              </div>
+
+           </div>
+        </div>
+
+        {/* The Grid Canvas Container */}
+        <div 
+          ref={canvasRef}
+          className="flex-1 relative overflow-hidden cursor-crosshair"
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+          onWheel={handleWheel}
+          onMouseDown={startPanning}
+          style={{
+            // Pan grid background
+            backgroundPosition: `${view.x}px ${view.y}px`,
+            // Scale grid background
+            backgroundSize: `${20 * view.scale}px ${20 * view.scale}px`,
+            backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)',
+            cursor: dragState?.mode === 'panning' ? 'grabbing' : 'grab'
+          }}
+        >
+            {/* World Container - Applies Zoom & Pan to all elements */}
+            <div 
+              style={{ 
+                transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
+                transformOrigin: '0 0',
+                width: '100%',
+                height: '100%'
+              }}
+            >
+                {elements.length === 0 && (
+                    // Need to reverse scale for this static UI so it doesn't shrink/grow weirdly
+                    <div 
+                      className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-40"
+                      style={{ transform: `translate(${-view.x/view.scale}px, ${-view.y/view.scale}px) scale(${1/view.scale})` }}
+                    >
+                        <div className="text-center">
+                            <Move className="w-12 h-12 text-gray-400 mx-auto mb-2" />
+                            <h3 className="text-xl font-medium text-gray-500">Canvas Empty</h3>
+                            <p className="text-gray-400">Drag shapes from the sidebar</p>
+                            <p className="text-gray-400 text-xs mt-2">Scroll to Zoom • Drag BG to Pan</p>
+                        </div>
+                    </div>
+                )}
+                
+                {elements.map(renderElement)}
+            </div>
+
+            {/* Zoom Controls (Floating UI - unaffected by zoom/pan) */}
+            <div className="absolute bottom-6 right-6 flex flex-col bg-white shadow-lg border border-gray-200 rounded-lg overflow-hidden">
+                <button onClick={zoomIn} className="p-2 hover:bg-gray-50 border-b border-gray-100" title="Zoom In">
+                    <ZoomIn className="w-5 h-5 text-gray-600" />
+                </button>
+                <button onClick={resetView} className="p-2 hover:bg-gray-50 border-b border-gray-100" title="Reset View">
+                    <Maximize className="w-5 h-5 text-gray-600" />
+                </button>
+                <button onClick={zoomOut} className="p-2 hover:bg-gray-50" title="Zoom Out">
+                    <ZoomOut className="w-5 h-5 text-gray-600" />
+                </button>
+            </div>
+            <div className="absolute bottom-6 left-6 bg-white/80 backdrop-blur px-2 py-1 rounded text-xs text-gray-500 pointer-events-none">
+                {Math.round(view.scale * 100)}%
+            </div>
+        </div>
+      </div>
+
+    </div>
+  );
+}

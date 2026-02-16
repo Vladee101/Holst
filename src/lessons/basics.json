@@ -1,0 +1,35 @@
+[
+    {
+        "id": "basics",
+        "title": "Holst Basics",
+        "steps": [
+            {
+                "id": "add_rect",
+                "title": "Add a Rectangle",
+                "instruction": "Click the Rectangle button in the toolbar to add a shape.",
+                "type": "create_element",
+                "targetType": "rectangle"
+            },
+            {
+                "id": "move_rect",
+                "title": "Move it",
+                "instruction": "Drag the rectangle to a new position.",
+                "type": "move_element"
+            },
+            {
+                "id": "change_color",
+                "title": "Color it",
+                "instruction": "Select the rectangle and change its color in the property panel.",
+                "type": "change_property",
+                "targetProperty": "color"
+            },
+            {
+                "id": "add_text",
+                "title": "Add Text",
+                "instruction": "Add a text element and change its content.",
+                "type": "create_element",
+                "targetType": "text"
+            }
+        ]
+    }
+]
