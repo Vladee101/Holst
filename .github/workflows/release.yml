@@ -46,7 +46,8 @@ jobs:
       - name: install frontend dependencies
         run: npm install # change this to yarn or pnpm depending on which one you use.
 
-      - uses: tauri-apps/tauri-action@v0
+      - name: build Tauri app
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -56,3 +57,24 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+          
+      # Upload Windows artifacts (MSI and EXE)
+      - name: Upload Windows artifacts
+        if: matrix.platform == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+            
+      # Upload macOS artifacts (DMG and APP)
+      - name: Upload macOS artifacts
+        if: matrix.platform == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-installers-${{ matrix.args == '--target aarch64-apple-darwin' && 'arm64' || 'intel' }}
+          path: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/macos/*.app
+            src-tauri/target/release/bundle/macos/*.app.tar.gz
