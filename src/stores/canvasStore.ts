@@ -2,7 +2,7 @@ import { create } from 'zustand';
 
 export interface CanvasElement {
     id: string;
-    type: 'square' | 'circle' | 'text' | 'line' | 'arrow';
+    type: 'square' | 'circle' | 'text' | 'line' | 'arrow' | 'image' | 'human' | 'arrow-90' | 'arrow-curve';
     x: number;
     y: number;
     width: number;
@@ -10,6 +10,8 @@ export interface CanvasElement {
     rotate: number;
     color: string;
     text?: string;
+    src?: string; // For images
+    bidirectional?: boolean; // For dual-ended arrows
 }
 
 interface ViewState {
@@ -27,7 +29,7 @@ interface Project {
 interface CanvasState {
     project: Project;
     view: ViewState;
-    selectedElementId: string | null;
+    selectedElementIds: string[];
     editingElementId: string | null; // For text editing
 
     // History
@@ -41,8 +43,15 @@ interface CanvasState {
     setElements: (elements: CanvasElement[]) => void;
     removeElement: (id: string) => void;
 
-    selectElement: (id: string | null) => void;
+    removeElements: (ids: string[]) => void;
+
+    setSelectedElements: (ids: string[]) => void;
     setEditingElement: (id: string | null) => void;
+
+    updateElements: (updates: { id: string, updates: Partial<CanvasElement> }[]) => void;
+
+    activeTool: string | null;
+    setActiveTool: (tool: string | null) => void;
 
     setView: (view: Partial<ViewState>) => void;
     loadProject: (elements: CanvasElement[]) => void;
@@ -57,8 +66,9 @@ const initialProject: Project = {
 export const useCanvasStore = create<CanvasState>((set) => ({
     project: initialProject,
     view: { x: 0, y: 0, scale: 1 },
-    selectedElementId: null,
+    selectedElementIds: [],
     editingElementId: null,
+    activeTool: null,
 
     // History Tracking
     past: [],
@@ -75,8 +85,9 @@ export const useCanvasStore = create<CanvasState>((set) => ({
                 past: newPast,
                 future: [state.project, ...state.future],
                 project: previous,
-                selectedElementId: null,
-                editingElementId: null
+                selectedElementIds: [],
+                editingElementId: null,
+                activeTool: null // Reset tool on undo? Maybe prefer keeping it but usually standard to reset selection/tools on history jump
             };
         });
     },
@@ -92,8 +103,9 @@ export const useCanvasStore = create<CanvasState>((set) => ({
                 past: [...state.past, state.project],
                 future: newFuture,
                 project: next,
-                selectedElementId: null,
-                editingElementId: null
+                selectedElementIds: [],
+                editingElementId: null,
+                activeTool: null
             };
         });
     },
@@ -106,13 +118,20 @@ export const useCanvasStore = create<CanvasState>((set) => ({
                 ...state.project,
                 elements: [...state.project.elements, element],
             },
-            selectedElementId: element.id,
+            selectedElementIds: [element.id],
             editingElementId: startEditing ? element.id : null,
+            // Don't reset activeTool here, handle in component or separate action if needed
+            // Actually, usually tools persist until manually changed or ESC pressed, but for "one-shot" creation usually they reset. 
+            // Let's handle reset in the component for now to be flexible.
         }));
     },
 
     updateElement: (id, updates) => {
         set((state) => ({
+            // Only add to history if "significant" change? 
+            // For dragging, we might flood history. Usually onDragEnd adds to history.
+            // But here we just have simple updateElement. 
+            // We'll leave history logic as is for now.
             past: [...state.past, state.project],
             future: [],
             project: {
@@ -122,6 +141,23 @@ export const useCanvasStore = create<CanvasState>((set) => ({
                 ),
             },
         }));
+    },
+
+    updateElements: (elementUpdates) => {
+        set((state) => {
+            const updatesMap = new Map(elementUpdates.map(u => [u.id, u.updates]));
+            return {
+                past: [...state.past, state.project],
+                future: [],
+                project: {
+                    ...state.project,
+                    elements: state.project.elements.map((el) => {
+                        const updates = updatesMap.get(el.id);
+                        return updates ? { ...el, ...updates } : el;
+                    }),
+                },
+            };
+        });
     },
 
     setElements: (elements) => {
@@ -140,16 +176,39 @@ export const useCanvasStore = create<CanvasState>((set) => ({
                 ...state.project,
                 elements: state.project.elements.filter((el) => el.id !== id),
             },
-            selectedElementId: state.selectedElementId === id ? null : state.selectedElementId,
+            selectedElementIds: state.selectedElementIds.filter(selectedId => selectedId !== id),
         }));
     },
 
-    selectElement: (id) => {
-        set({ selectedElementId: id });
+    removeElements: (ids) => {
+        set((state) => {
+            const idsSet = new Set(ids);
+            return {
+                past: [...state.past, state.project],
+                future: [],
+                project: {
+                    ...state.project,
+                    elements: state.project.elements.filter((el) => !idsSet.has(el.id)),
+                },
+                selectedElementIds: state.selectedElementIds.filter(id => !idsSet.has(id)),
+            };
+        });
+    },
+
+    setSelectedElements: (ids) => {
+        set({ selectedElementIds: ids });
     },
 
     setEditingElement: (id) => {
         set({ editingElementId: id });
+    },
+
+    setActiveTool: (tool) => {
+        set((state) => ({
+            activeTool: tool,
+            selectedElementIds: tool ? [] : state.selectedElementIds,
+            editingElementId: null
+        }));
     },
 
     setView: (newView) => {
@@ -163,8 +222,9 @@ export const useCanvasStore = create<CanvasState>((set) => ({
             past: [], // Reset history on new project load
             future: [],
             project: { ...state.project, elements },
-            selectedElementId: null,
-            view: { x: 0, y: 0, scale: 1 }
+            selectedElementIds: [],
+            view: { x: 0, y: 0, scale: 1 },
+            activeTool: null
         }));
     },
 }));
