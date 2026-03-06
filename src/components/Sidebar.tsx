@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { Square, Circle, Type, Minus, MoveRight, Grid, Image, CornerDownRight, Spline, MousePointer2 } from 'lucide-react';
+import { Square, Type, Minus, MoveRight, Grid, Image, CornerDownRight, Spline, MousePointer2, Diamond } from 'lucide-react';
 import { useCanvasStore } from '../stores/canvasStore';
 
 export function Sidebar() {
-    const { setActiveTool, activeTool } = useCanvasStore();
+    const { setActiveTool, activeTool, isDashed, setIsDashed } = useCanvasStore();
     const [tooltip, setTooltip] = useState<{ label: string, top: number, left: number } | null>(null);
 
     const handleDragStart = (e: React.DragEvent, type: string) => {
@@ -41,6 +41,22 @@ export function Sidebar() {
 
                 {/* Connectors */}
                 <div className="flex flex-col gap-2">
+                    <button
+                        onClick={() => setIsDashed(!isDashed)}
+                        className={`w-10 h-10 border rounded-lg flex flex-col items-center justify-center transition-colors shrink-0
+                            ${isDashed ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200 text-blue-600' : 'border-zinc-200 hover:border-blue-500 hover:bg-blue-50 text-zinc-600'}
+                        `}
+                        onMouseEnter={(e) => {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            setTooltip({ label: isDashed ? 'Solid Lines' : 'Dashed Lines', top: rect.top + rect.height / 2, left: rect.right + 12 });
+                        }}
+                        onMouseLeave={() => setTooltip(null)}
+                    >
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeDasharray={isDashed ? "0" : "6 6"}>
+                            <line x1="3" y1="12" x2="21" y2="12" />
+                        </svg>
+                    </button>
+                    <div className="w-6 h-px bg-zinc-200 shrink-0 self-center my-0.5" />
                     <SidebarItem
                         type="line"
                         label="Line"
@@ -89,9 +105,20 @@ export function Sidebar() {
                         setTooltip={setTooltip}
                     />
                     <SidebarItem
-                        type="circle"
-                        label="Circle"
-                        icon={<Circle className="w-5 h-5 text-zinc-600" />}
+                        type="diamond"
+                        label="Diamond"
+                        icon={<Diamond className="w-5 h-5 text-zinc-600" />}
+                        onDragStart={handleDragStart}
+                        setTooltip={setTooltip}
+                    />
+                    <SidebarItem
+                        type="oval"
+                        label="Oval"
+                        icon={
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5 text-zinc-600">
+                                <ellipse cx="12" cy="12" rx="10" ry="6" />
+                            </svg>
+                        }
                         onDragStart={handleDragStart}
                         setTooltip={setTooltip}
                     />

@@ -148,7 +148,7 @@ export function Canvas() {
         project, view, selectedElementIds, editingElementId,
         addElement, updateElement, removeElements, updateElements,
         setSelectedElements, setEditingElement, setView, loadProject,
-        activeTool // Consuming activeTool
+        activeTool, isDashed // Consuming activeTool and isDashed
     } = useCanvasStore();
 
     const canvasRef = useRef<HTMLDivElement>(null);
@@ -207,6 +207,14 @@ export function Canvas() {
             width = 200;
             height = 50;
         }
+        if (type === 'oval') {
+            width = 120;
+            height = 80;
+        }
+        if (type === 'diamond') {
+            width = 100;
+            height = 100;
+        }
         if (type === 'image') {
             width = 300;
             height = 200;
@@ -231,6 +239,7 @@ export function Canvas() {
             width,
             height,
             src: type === 'image' ? '' : undefined,
+            dashed: (type === 'line' || type === 'arrow' || type === 'arrow-90' || type === 'arrow-curve') ? isDashed : undefined
         };
 
         addElement(newElement, type === 'text'); // Only auto-edit for text, images need double click to select file
@@ -337,6 +346,7 @@ export function Canvas() {
                 rotate: 0,
                 color: 'bg-black',
                 text: '',
+                dashed: (type === 'line' || type === 'arrow' || type === 'arrow-90' || type === 'arrow-curve') ? isDashed : undefined
             };
 
             // If it's 90-deg or curve, we might need strictly positive width/height for SVG viewBox?
@@ -471,8 +481,15 @@ export function Canvas() {
             }
             else if (dragState.mode === 'resizing-shape' && dragState.initial) {
                 const el = dragState.initial;
-                const newWidth = Math.max(30, mouseX - el.x);
-                const newHeight = Math.max(30, mouseY - el.y);
+                let newWidth = Math.max(30, mouseX - el.x);
+                let newHeight = Math.max(30, mouseY - el.y);
+
+                if (el.type === 'oval' && (e.ctrlKey || e.metaKey)) {
+                    const maxDim = Math.max(newWidth, newHeight);
+                    newWidth = maxDim;
+                    newHeight = maxDim;
+                }
+
                 updateElement(dragState.id!, { width: newWidth, height: newHeight });
             }
             else if ((dragState.mode === 'resizing-end' || dragState.mode === 'creating') && dragState.initial) {
@@ -596,6 +613,22 @@ export function Canvas() {
                         return { id, updates: { bidirectional: !(el as any)?.bidirectional } as Partial<CanvasElement> };
                     });
                     updateElements(updates);
+                }
+            }
+
+            // Dashed Toggle
+            if (e.key === 'd' && selectedElementIds.length > 0) {
+                const tagName = document.activeElement?.tagName;
+                if (tagName !== 'INPUT' && tagName !== 'TEXTAREA') {
+                    const storeState = useCanvasStore.getState();
+                    const updates = selectedElementIds.map(id => {
+                        const el = storeState.project.elements.find(e => e.id === id);
+                        if (el && ['line', 'arrow', 'arrow-90', 'arrow-curve'].includes(el.type)) {
+                            return { id, updates: { dashed: !el.dashed } as Partial<CanvasElement> };
+                        }
+                        return null;
+                    }).filter(Boolean) as { id: string, updates: Partial<CanvasElement> }[];
+                    if (updates.length > 0) updateElements(updates);
                 }
             }
         };
@@ -736,6 +769,132 @@ export function Canvas() {
             );
         }
 
+        if (el.type === 'oval') {
+            return (
+                <div
+                    key={el.id}
+                    style={style}
+                    className={`${commonClasses} cursor-move bg-white border-[3px] ${getColorParams(el.color).border} rounded-[50%] ${isSelected ? 'ring-2 ring-blue-500 ring-offset-2' : 'hover:ring-2 hover:ring-blue-200'}`}
+                    onMouseDown={(e) => startMoving(e, el.id)}
+                    onDoubleClick={(e) => { e.stopPropagation(); setEditingElement(el.id); }}
+                >
+                    {isEditing ? (
+                        <div className="w-[70%] h-[70%] flex items-center justify-center">
+                            <textarea
+                                className="w-full h-full bg-transparent text-center resize-none outline-none font-medium text-zinc-800 flex flex-col justify-center"
+                                value={el.text || ''}
+                                onChange={(e) => updateElement(el.id, { text: e.target.value })}
+                                onFocus={(e) => {
+                                    const val = e.target.value;
+                                    e.target.setSelectionRange(val.length, val.length);
+                                }}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onBlur={() => setEditingElement(null)}
+                                onKeyDown={(e) => {
+                                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                        e.preventDefault();
+                                        setEditingElement(null);
+                                    }
+                                    if (e.key === 'Escape') {
+                                        e.preventDefault();
+                                        setEditingElement(null);
+                                    }
+                                }}
+                                autoFocus
+                            />
+                        </div>
+                    ) : (
+                        <div className="w-[70%] h-[70%] flex items-center justify-center pointer-events-none overflow-hidden">
+                            <span className="text-center font-medium text-zinc-700 break-words leading-tight w-full">{el.text}</span>
+                        </div>
+                    )}
+
+                    {isSelected && (
+                        <>
+                            <div className="absolute -top-6 left-0 text-xs bg-black text-white px-1 rounded" style={{ transform: `scale(${1 / view.scale})` }}>Oval</div>
+                            <ResizeHandle
+                                className="cursor-nwse-resize"
+                                style={{ right: '14.6%', bottom: '14.6%' }}
+                                onMouseDown={(e) => startResizing(e, el.id, 'resizing-shape')}
+                            />
+                        </>
+                    )}
+                </div>
+            );
+        }
+
+        if (el.type === 'diamond') {
+            return (
+                <div
+                    key={el.id}
+                    style={style}
+                    className={`${commonClasses} cursor-move ${isSelected ? 'ring-2 ring-blue-500 ring-offset-2' : 'hover:ring-2 hover:ring-blue-200'} rounded-none`}
+                    onMouseDown={(e) => startMoving(e, el.id)}
+                    onDoubleClick={(e) => { e.stopPropagation(); setEditingElement(el.id); }}
+                >
+                    {/* SVG Background */}
+                    <svg
+                        viewBox="0 0 100 100"
+                        preserveAspectRatio="none"
+                        className="absolute inset-0 w-full h-full pointer-events-none"
+                    >
+                        <polygon
+                            points="50,1.5 98.5,50 50,98.5 1.5,50"
+                            fill="white"
+                            stroke={getColorParams(el.color).hex}
+                            strokeWidth="2"
+                            vectorEffect="non-scaling-stroke"
+                        />
+                    </svg>
+
+                    {/* Content */}
+                    <div className="absolute inset-0 z-10 flex items-center justify-center">
+                        {isEditing ? (
+                            <div className="w-[70%] h-[70%] flex items-center justify-center">
+                                <textarea
+                                    className="w-full h-full bg-transparent text-center resize-none outline-none font-medium text-zinc-800 flex flex-col justify-center"
+                                    value={el.text || ''}
+                                    onChange={(e) => updateElement(el.id, { text: e.target.value })}
+                                    onFocus={(e) => {
+                                        const val = e.target.value;
+                                        e.target.setSelectionRange(val.length, val.length);
+                                    }}
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                    onBlur={() => setEditingElement(null)}
+                                    onKeyDown={(e) => {
+                                        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                            e.preventDefault();
+                                            setEditingElement(null);
+                                        }
+                                        if (e.key === 'Escape') {
+                                            e.preventDefault();
+                                            setEditingElement(null);
+                                        }
+                                    }}
+                                    autoFocus
+                                />
+                            </div>
+                        ) : (
+                            <div className="w-[70%] h-[70%] flex items-center justify-center pointer-events-none overflow-hidden">
+                                <span className="text-center font-medium text-zinc-700 break-words leading-tight w-full">{el.text}</span>
+                            </div>
+                        )}
+                    </div>
+
+                    {isSelected && (
+                        <>
+                            <div className="absolute -top-6 left-0 text-xs bg-black text-white px-1 rounded z-20" style={{ transform: `scale(${1 / view.scale})` }}>Diamond</div>
+                            <ResizeHandle
+                                className="cursor-nwse-resize z-20"
+                                style={{ right: '-6px', bottom: '-6px' }}
+                                onMouseDown={(e) => startResizing(e, el.id, 'resizing-shape')}
+                            />
+                        </>
+                    )}
+                </div>
+            );
+        }
+
         if (el.type === 'text') {
             return (
                 <div
@@ -794,10 +953,59 @@ export function Canvas() {
                 <div
                     key={el.id}
                     style={style}
-                    className={`${commonClasses} cursor-move`}
+                    className={`${commonClasses} cursor-move flex items-center justify-center`}
                     onMouseDown={(e) => startMoving(e, el.id)}
+                    onDoubleClick={(e) => { e.stopPropagation(); setEditingElement(el.id); }}
                 >
-                    <div className={`w-full h-[2px] rounded-full ${el.color} ${isSelected ? 'ring-1 ring-blue-400 ring-offset-2' : ''}`} />
+                    <div className={`absolute left-0 right-0 ${el.dashed ? `border-t-2 border-dashed ${getColorParams(el.color).border}` : `h-[2px] rounded-full ${getColorParams(el.color).bg}`} ${isSelected ? 'ring-1 ring-blue-400 ring-offset-2' : ''}`} />
+
+                    {/* Text Overlay for Connector */}
+                    <div
+                        className="absolute z-10 flex items-center justify-center pointer-events-none"
+                        style={{
+                            left: '50%',
+                            top: '50%',
+                            transform: `translate(-50%, -50%) translateY(-24px) rotate(${(() => {
+                                let globalAngle = (el.rotate || 0) % 360;
+                                if (globalAngle > 180) globalAngle -= 360;
+                                if (globalAngle <= -180) globalAngle += 360;
+                                return Math.abs(globalAngle) > 90 ? 180 : 0;
+                            })()
+                                }deg)`
+                        }}
+                    >
+                        {isEditing ? (
+                            <div className="w-full h-full flex items-center justify-center pointer-events-auto">
+                                <textarea
+                                    className="w-full bg-transparent text-center resize-none outline-none font-medium text-zinc-800 flex flex-col justify-center"
+                                    style={{ minHeight: '1.5em' }}
+                                    value={el.text || ''}
+                                    onChange={(e) => updateElement(el.id, { text: e.target.value })}
+                                    onFocus={(e) => {
+                                        const val = e.target.value;
+                                        e.target.setSelectionRange(val.length, val.length);
+                                    }}
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                    onBlur={() => setEditingElement(null)}
+                                    onKeyDown={(e) => {
+                                        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                            e.preventDefault();
+                                            setEditingElement(null);
+                                        }
+                                        if (e.key === 'Escape') {
+                                            e.preventDefault();
+                                            setEditingElement(null);
+                                        }
+                                    }}
+                                    autoFocus
+                                />
+                            </div>
+                        ) : el.text ? (
+                            <div className="bg-transparent px-2 py-1 flex items-center justify-center pointer-events-none overflow-hidden max-w-full">
+                                <span className="text-center font-medium text-zinc-800 break-words leading-tight w-full">{el.text}</span>
+                            </div>
+                        ) : null}
+                    </div>
 
                     {isSelected && (
                         <>
@@ -824,6 +1032,7 @@ export function Canvas() {
                     style={style}
                     className={`${commonClasses} cursor-move flex items-center justify-start`}
                     onMouseDown={(e) => startMoving(e, el.id)}
+                    onDoubleClick={(e) => { e.stopPropagation(); setEditingElement(el.id); }}
                 >
                     <svg width="100%" height="100%" overflow="visible" className="absolute top-0 left-0">
                         <defs>
@@ -840,10 +1049,59 @@ export function Canvas() {
                             strokeWidth="2"
                             fill="none"
                             strokeLinecap="round"
+                            strokeDasharray={el.dashed ? '8,8' : 'none'}
                             markerEnd={`url(#arrowhead-${el.id})`}
                             markerStart={el.bidirectional ? `url(#arrowhead-reverse-${el.id})` : undefined}
                         />
                     </svg>
+
+                    {/* Text Overlay for Connector */}
+                    <div
+                        className="absolute z-10 flex items-center justify-center pointer-events-none"
+                        style={{
+                            left: '50%',
+                            top: '50%',
+                            transform: `translate(-50%, -50%) translateY(-24px) rotate(${(() => {
+                                    let globalAngle = (el.rotate || 0) % 360;
+                                    if (globalAngle > 180) globalAngle -= 360;
+                                    if (globalAngle <= -180) globalAngle += 360;
+                                    return Math.abs(globalAngle) > 90 ? 180 : 0;
+                                })()
+                                }deg)`
+                        }}
+                    >
+                        {isEditing ? (
+                            <div className="w-full h-full flex items-center justify-center pointer-events-auto">
+                                <textarea
+                                    className="w-full bg-transparent text-center resize-none outline-none font-medium text-zinc-800 flex flex-col justify-center"
+                                    style={{ minHeight: '1.5em' }}
+                                    value={el.text || ''}
+                                    onChange={(e) => updateElement(el.id, { text: e.target.value })}
+                                    onFocus={(e) => {
+                                        const val = e.target.value;
+                                        e.target.setSelectionRange(val.length, val.length);
+                                    }}
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                    onBlur={() => setEditingElement(null)}
+                                    onKeyDown={(e) => {
+                                        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                            e.preventDefault();
+                                            setEditingElement(null);
+                                        }
+                                        if (e.key === 'Escape') {
+                                            e.preventDefault();
+                                            setEditingElement(null);
+                                        }
+                                    }}
+                                    autoFocus
+                                />
+                            </div>
+                        ) : el.text ? (
+                            <div className="bg-transparent px-2 py-1 flex items-center justify-center pointer-events-none overflow-hidden max-w-full">
+                                <span className="text-center font-medium text-zinc-800 break-words leading-tight w-full">{el.text}</span>
+                            </div>
+                        ) : null}
+                    </div>
 
                     {isSelected && (
                         <>
@@ -963,8 +1221,16 @@ export function Canvas() {
                 ey = el.width * Math.sin(rads) * Math.cos(rads);
             }
 
+            const localAngleDeg = Math.atan2(ey, ex) * (180 / Math.PI);
+            const globalAngle = (el.rotate || 0) + localAngleDeg;
+            let normalizedGlobal = globalAngle % 360;
+            if (normalizedGlobal > 180) normalizedGlobal -= 360;
+            if (normalizedGlobal <= -180) normalizedGlobal += 360;
+            const isUpsideDown = Math.abs(normalizedGlobal) > 90;
+            const textRotation = isUpsideDown ? localAngleDeg + 180 : localAngleDeg;
+
             return (
-                <div key={el.id} style={style} className={`${commonClasses} cursor-move flex items-center`} onMouseDown={(e) => startMoving(e, el.id)}>
+                <div key={el.id} style={style} className={`${commonClasses} cursor-move flex items-center`} onMouseDown={(e) => startMoving(e, el.id)} onDoubleClick={(e) => { e.stopPropagation(); setEditingElement(el.id); }}>
                     <svg width="100%" height="100%" overflow="visible">
                         <defs>
                             <marker id={`arrowhead-90-${el.id}`} markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -980,10 +1246,54 @@ export function Canvas() {
                             strokeWidth="2"
                             fill="none"
                             strokeLinejoin="round"
+                            strokeDasharray={el.dashed ? '8,8' : 'none'}
                             markerEnd={`url(#arrowhead-90-${el.id})`}
                             markerStart={el.bidirectional ? `url(#arrowhead-reverse-90-${el.id})` : undefined}
                         />
                     </svg>
+
+                    <div
+                        className="absolute z-10 flex items-center justify-center pointer-events-none"
+                        style={{
+                            left: ex / 2,
+                            top: 10 + ey / 2,
+                            transform: `translate(-50%, -50%) rotate(${textRotation}deg) translateY(-24px)`,
+                            width: `${Math.max(100, Math.sqrt(ex * ex + ey * ey))}px`
+                        }}
+                    >
+                        {isEditing ? (
+                            <div className="w-full h-full flex items-center justify-center pointer-events-auto">
+                                <textarea
+                                    className="w-full bg-transparent text-center resize-none outline-none font-medium text-zinc-800 flex flex-col justify-center"
+                                    style={{ minHeight: '1.5em' }}
+                                    value={el.text || ''}
+                                    onChange={(e) => updateElement(el.id, { text: e.target.value })}
+                                    onFocus={(e) => {
+                                        const val = e.target.value;
+                                        e.target.setSelectionRange(val.length, val.length);
+                                    }}
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                    onBlur={() => setEditingElement(null)}
+                                    onKeyDown={(e) => {
+                                        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                            e.preventDefault();
+                                            setEditingElement(null);
+                                        }
+                                        if (e.key === 'Escape') {
+                                            e.preventDefault();
+                                            setEditingElement(null);
+                                        }
+                                    }}
+                                    autoFocus
+                                />
+                            </div>
+                        ) : el.text ? (
+                            <div className="bg-transparent px-2 py-1 flex items-center justify-center pointer-events-none overflow-hidden max-w-full">
+                                <span className="text-center font-medium text-zinc-800 break-words leading-tight w-full">{el.text}</span>
+                            </div>
+                        ) : null}
+                    </div>
+
                     {isSelected && (
                         <>
                             <ResizeHandle className="-left-1.5 cursor-crosshair" style={{ top: '50%', transform: 'translateY(-50%)' }} onMouseDown={(e) => startResizing(e, el.id, 'resizing-start')} />
@@ -1021,10 +1331,12 @@ export function Canvas() {
                             stroke={getColorParams(el.color).hex}
                             strokeWidth="2"
                             fill="none"
+                            strokeDasharray={el.dashed ? '8,8' : 'none'}
                             markerEnd={`url(#arrowhead-curve-${el.id})`}
                             markerStart={el.bidirectional ? `url(#arrowhead-reverse-curve-${el.id})` : undefined}
                         />
                     </svg>
+
                     {isSelected && (
                         <>
                             <ResizeHandle className="-left-1.5 cursor-crosshair" style={{ top: '50%', transform: 'translateY(-50%)' }} onMouseDown={(e) => startResizing(e, el.id, 'resizing-start')} />
@@ -1091,6 +1403,12 @@ export function Canvas() {
                     <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 rounded-md text-zinc-600 text-sm">
                         {dragState?.mode === 'panning' ? <Move className="w-4 h-4" /> : <MousePointer2 className="w-4 h-4" />}
                         <span>{selectedElementIds.length > 0 ? `${selectedElementIds.length} Selected` : 'Drag BG to Pan'}</span>
+                        {selectedElementIds.length === 1 && project.elements.find(el => el.id === selectedElementIds[0])?.type === 'oval' && (
+                            <span className="text-zinc-400 italic text-xs ml-2">Hold "Ctrl" to draw a perfect circle</span>
+                        )}
+                        {selectedElementIds.length === 1 && ['arrow', 'arrow-90', 'arrow-curve'].includes(project.elements.find(el => el.id === selectedElementIds[0])?.type || '') && (
+                            <span className="text-zinc-400 italic text-xs ml-2">Press "B" to toggle dual-ended arrow</span>
+                        )}
                     </div>
                 </div>
 

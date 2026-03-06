@@ -2,7 +2,7 @@ import { create } from 'zustand';
 
 export interface CanvasElement {
     id: string;
-    type: 'square' | 'circle' | 'text' | 'line' | 'arrow' | 'image' | 'human' | 'arrow-90' | 'arrow-curve';
+    type: 'square' | 'circle' | 'oval' | 'diamond' | 'text' | 'line' | 'arrow' | 'image' | 'human' | 'arrow-90' | 'arrow-curve';
     x: number;
     y: number;
     width: number;
@@ -12,6 +12,7 @@ export interface CanvasElement {
     text?: string;
     src?: string; // For images
     bidirectional?: boolean; // For dual-ended arrows
+    dashed?: boolean; // For dashed lines
 }
 
 interface ViewState {
@@ -53,6 +54,9 @@ interface CanvasState {
     activeTool: string | null;
     setActiveTool: (tool: string | null) => void;
 
+    isDashed: boolean;
+    setIsDashed: (dashed: boolean) => void;
+
     setView: (view: Partial<ViewState>) => void;
     loadProject: (elements: CanvasElement[]) => void;
 }
@@ -69,6 +73,7 @@ export const useCanvasStore = create<CanvasState>((set) => ({
     selectedElementIds: [],
     editingElementId: null,
     activeTool: null,
+    isDashed: false,
 
     // History Tracking
     past: [],
@@ -209,6 +214,10 @@ export const useCanvasStore = create<CanvasState>((set) => ({
             selectedElementIds: tool ? [] : state.selectedElementIds,
             editingElementId: null
         }));
+    },
+
+    setIsDashed: (dashed) => {
+        set({ isDashed: dashed });
     },
 
     setView: (newView) => {
